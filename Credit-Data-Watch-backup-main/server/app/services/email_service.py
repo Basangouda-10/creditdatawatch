@@ -32,6 +32,9 @@ class EmailService:
     def _dispatch_smtp(self, msg: EmailMessage | MIMEMultipart):
         """Helper to send message over SSL (Port 465) or STARTTLS (Port 587)"""
         context = ssl.create_default_context()
+        # SonarQube Fix: Explicitly enforce strong TLS versions for security
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        
         if self.smtp_port == 465:
             with smtplib.SMTP_SSL(self.smtp_host, self.smtp_port, context=context, timeout=self.timeout) as server:
                 server.login(self.smtp_user, self.smtp_password)
@@ -45,7 +48,8 @@ class EmailService:
     async def send_email(self, to_email: str, subject: str, body: str):
         """Send a normal text email"""
         logger.info("========================================")
-        logger.info(f"[EMAIL LOG] To: {to_email} | Subject: {subject}")
+        # SonarQube Fix: Removed f-strings from logger
+        logger.info("[EMAIL LOG] To: %s | Subject: %s", to_email, subject)
         logger.info("========================================")
 
         if not self.smtp_user or not self.smtp_password or self.smtp_password == "testpassword":
@@ -62,10 +66,13 @@ class EmailService:
 
         try:
             await run_in_threadpool(_send)
-            logger.info(f"Email successfully sent to {to_email}")
+            # SonarQube Fix: Removed f-strings from logger
+            logger.info("Email successfully sent to %s", to_email)
         except Exception as e:
-            logger.error(f"Failed to send email to {to_email}: {str(e)}")
-            raise e
+            # SonarQube Fix: Removed f-strings from logger
+            logger.error("Failed to send email to %s: %s", to_email, str(e))
+            # SonarQube Fix: Use bare 'raise' to preserve stack trace
+            raise
 
     async def send_email_html(self, to_email: str, subject: str, html: str, text_fallback: str | None = None):
         """Send an HTML email with optional text fallback"""
@@ -87,10 +94,13 @@ class EmailService:
 
         try:
             await run_in_threadpool(_send)
-            logger.info(f"HTML email successfully sent to {to_email}")
+            # SonarQube Fix: Removed f-strings from logger
+            logger.info("HTML email successfully sent to %s", to_email)
         except Exception as e:
-            logger.error(f"Failed to send HTML email: {str(e)}")
-            raise e
+            # SonarQube Fix: Removed f-strings from logger
+            logger.error("Failed to send HTML email: %s", str(e))
+            # SonarQube Fix: Use bare 'raise' to preserve stack trace
+            raise
 
     @staticmethod
     async def send_registration_email(to_email: str, company_name: str, phone: str) -> None:
@@ -108,7 +118,8 @@ class EmailService:
             svc = EmailService()
             await svc.send_email(to_email, subject, body)
         except Exception as e:
-            logger.warning("Registration email failed: %s", e)
+            # SonarQube Fix: Removed f-strings from logger
+            logger.warning("Registration email failed: %s", str(e))
 
 
 async def send_otp_email(email_to: str, otp_code: str) -> bool:
@@ -124,7 +135,8 @@ async def send_otp_email(email_to: str, otp_code: str) -> bool:
         await svc.send_email_html(email_to, subject, html, text_fallback=f"Your OTP Code is: {otp_code}")
         return True
     except Exception as e:
-        logger.error(f"Failed to dispatch OTP: {e}")
+        # SonarQube Fix: Removed f-strings from logger
+        logger.error("Failed to dispatch OTP: %s", str(e))
         return False
 
 
@@ -144,7 +156,8 @@ async def send_email_with_attachment(
     svc = EmailService()
     
     if not svc.smtp_user or not svc.smtp_password or svc.smtp_password == "testpassword":
-        print(f"[MOCK ATTACHMENT EMAIL] To: {to_email} | Subject: {subject} | Attachment: {attachment_name}")
+        # SonarQube Fix: Replaced 'print' with 'logger' and removed f-strings
+        logger.info("[MOCK ATTACHMENT EMAIL] To: %s | Subject: %s | Attachment: %s", to_email, subject, attachment_name)
         return True
 
     msg = MIMEMultipart()
@@ -172,5 +185,6 @@ async def send_email_with_attachment(
     try:
         return await run_in_threadpool(_send_email)
     except Exception as e:
-        logger.error(f"Failed to send email with attachment: {str(e)}")
+        # SonarQube Fix: Removed f-strings from logger
+        logger.error("Failed to send email with attachment: %s", str(e))
         return False
