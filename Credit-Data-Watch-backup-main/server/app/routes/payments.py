@@ -96,14 +96,14 @@ async def initiate_payment(
         )
     except PlanNotFound:
         await db.rollback()
-        logger.warning(f"User {user_id} tried to purchase non-existent plan: {request.plan_id}")
+        logger.warning("User %s tried to purchase non-existent plan: %s", user_id, request.plan_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Plan not found or inactive",
         )
     except UserNotFound:
         await db.rollback()
-        logger.error(f"Authenticated user {user_id} not found in database")
+        logger.error("Authenticated user %s not found in database", user_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
@@ -113,7 +113,8 @@ async def initiate_payment(
         raise
     except Exception as e:
         await db.rollback()
-        logger.error(f"Error initiating payment for user {user_email}: {str(e)}", exc_info=True)
+        # SonarQube Fix: Removed f-string from logger
+        logger.error("Error initiating payment for user %s: %s", user_email, str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to initiate payment: {str(e)}",
@@ -180,7 +181,7 @@ async def verify_payment(
                 plan_name = plan_res.scalar() or "Premium"
                 await NotificationService.notify_subscription_activated(db, current_user.email, plan_name)
             except Exception as e:
-                logger.warning(f"Failed to trigger subscription notification: {e}")
+                logger.warning("Failed to trigger subscription notification: %s", str(e))
 
         subscription_data = None
         if subscription:
@@ -206,7 +207,8 @@ async def verify_payment(
         raise
     except Exception as e:
         await db.rollback()
-        logger.error(f"Error verifying payment {payment_id}: {str(e)}", exc_info=True)
+        # SonarQube Fix: Removed f-string from logger
+        logger.error("Error verifying payment %s: %s", payment_id, str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to verify payment: {str(e)}",
@@ -264,7 +266,8 @@ async def get_payment_status(
         raise
     except Exception as e:
         await db.rollback()
-        logger.error(f"Error getting payment status for {payment_id}: {str(e)}")
+        # SonarQube Fix: Removed f-string from logger
+        logger.error("Error getting payment status for %s: %s", payment_id, str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get payment status",
@@ -326,7 +329,7 @@ async def get_payment_history(
         )
     except Exception as e:
         await db.rollback()
-        logger.error(f"Error getting payment history for user {user_id}: {str(e)}")
+        logger.error("Error getting payment history for user %s: %s", user_id, str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get payment history",
@@ -382,7 +385,7 @@ async def cancel_payment(
         )
     except Exception as e:
         await db.rollback()
-        logger.error(f"Error cancelling payment {payment_id}: {str(e)}")
+        logger.error("Error cancelling payment %s: %s", payment_id, str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to cancel payment",
@@ -407,7 +410,9 @@ async def upload_payment_proof(
     user_id = str(getattr(current_user, "id", ""))
 
     try:
-        filename = f"{uuid.uuid4()}_{file.filename}"
+        # SonarQube Fix: Sanitize filename to prevent path traversal
+        safe_filename = os.path.basename(file.filename)
+        filename = f"{uuid.uuid4()}_{safe_filename}"
         filepath = f"uploads/payment_proofs/{filename}"
         
         await run_in_threadpool(_save_file_to_disk, file.file, filepath)
@@ -421,19 +426,20 @@ async def upload_payment_proof(
             WHERE id = :id AND user_id = :uid
         """), {
             "url": proof_url, 
-            "filename": file.filename, 
+            "filename": safe_filename, 
             "id": payment_id, 
             "uid": user_id
         })
         await db.commit()
         
-        logger.info(f"[PAYMENT] Proof uploaded for payment {payment_id}: {filename}")
+        # SonarQube Fix: Removed f-string from logger
+        logger.info("[PAYMENT] Proof uploaded for payment %s: %s", payment_id, filename)
         
         return ResponseFormatter.create_success(
             message="Payment proof uploaded successfully",
-            data={"url": proof_url, "filename": file.filename}
+            data={"url": proof_url, "filename": safe_filename}
         )
     except Exception as e:
         await db.rollback()
-        logger.error(f"Error uploading proof for payment {payment_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+        logger.error("Error uploading proof for payment %s: %s", payment_id, str(e))
+        raise HTTPException(status_code=500, detail="Upload failed due to internal error.")
