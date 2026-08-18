@@ -20,18 +20,25 @@ const ParticleBackground = () => {
     canvas.width = dimensions.width
     canvas.height = dimensions.height
 
+    // SonarQube Fix: Create a secure random number generator to replace Math.random()
+    const getSecureRandom = () => {
+      const array = new Uint32Array(1);
+      window.crypto.getRandomValues(array);
+      return array[0] / (0xffffffff + 1);
+    };
+
     const particles = []
     const particleCount = Math.min(80, Math.floor(dimensions.width / 20))
     const colors = ['rgba(79, 70, 229, 0.6)', 'rgba(124, 58, 237, 0.6)', 'rgba(14, 165, 233, 0.6)']
 
     for (let i = 0; i < particleCount; i++) {
       particles.push({
-        x: Math.random() * dimensions.width,
-        y: Math.random() * dimensions.height,
-        radius: Math.random() * 2 + 1,
-        color: colors[Math.floor(Math.random() * colors.length)],
-        dx: (Math.random() - 0.5) * 0.5,
-        dy: (Math.random() - 0.5) * 0.5
+        x: getSecureRandom() * dimensions.width,
+        y: getSecureRandom() * dimensions.height,
+        radius: getSecureRandom() * 2 + 1,
+        color: colors[Math.floor(getSecureRandom() * colors.length)],
+        dx: (getSecureRandom() - 0.5) * 0.5,
+        dy: (getSecureRandom() - 0.5) * 0.5
       })
     }
 
@@ -55,7 +62,10 @@ const ParticleBackground = () => {
         particles.slice(i + 1).forEach((p2) => {
           const dx = p.x - p2.x
           const dy = p.y - p2.y
-          const distance = Math.sqrt(dx * dx + dy * dy)
+          
+          // SonarQube Fix: Use Math.hypot instead of Math.sqrt for safe geometry calculations
+          const distance = Math.hypot(dx, dy)
+          
           if (distance < 120) {
             ctx.beginPath()
             ctx.moveTo(p.x, p.y)
