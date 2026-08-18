@@ -1,7 +1,7 @@
 """
 Payment management routes
 """
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from typing import Annotated
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +28,12 @@ import uuid
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Payments"])
+
+def sanitize_log(data) -> str:
+    """SonarQube Fix: Sanitize user inputs to prevent Log Injection vulnerabilities."""
+    if data is None:
+        return ""
+    return str(data).replace("\n", "").replace("\r", "")
 
 
 @router.post("/initiate", response_model=dict)
@@ -87,14 +93,14 @@ async def initiate_payment(
         )
     except PlanNotFound:
         await db.rollback()
-        logger.warning("User %s tried to purchase non-existent plan: %s", user_id, request.plan_id)
+        logger.warning("User %s tried to purchase non-existent plan: %s", sanitize_log(user_id), sanitize_log(request.plan_id))
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Plan not found or inactive",
         )
     except UserNotFound:
         await db.rollback()
-        logger.error("Authenticated user %s not found in database", user_id)
+        logger.error("Authenticated user %s not found in database", sanitize_log(user_id))
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
@@ -104,8 +110,7 @@ async def initiate_payment(
         raise
     except Exception:
         await db.rollback()
-        # SonarQube Fix: Exception safely logged, omitted from client response
-        logger.exception("Error initiating payment for user %s", user_email)
+        logger.exception("Error initiating payment for user %s", sanitize_log(user_email))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to initiate payment due to an internal error.",
@@ -162,9 +167,8 @@ async def verify_payment(
                 plan_res = await db.execute(plan_stmt)
                 plan_name = plan_res.scalar() or "Premium"
                 await NotificationService.notify_subscription_activated(db, current_user.email, plan_name)
-            except Exception:
-                # SonarQube Fix: Exception safely logged
-                logger.exception("Failed to trigger subscription notification")
+            except Exception as e:
+                logger.warning("Failed to trigger subscription notification: %s", sanitize_log(str(e)))
 
         subscription_data = None
         if subscription:
@@ -190,8 +194,7 @@ async def verify_payment(
         raise
     except Exception:
         await db.rollback()
-        # SonarQube Fix: Exception safely logged, omitted from client response
-        logger.exception("Error verifying payment %s", payment_id)
+        logger.exception("Error verifying payment %s", sanitize_log(payment_id))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to verify payment due to an internal error.",
@@ -241,7 +244,7 @@ async def get_payment_status(
         raise
     except Exception:
         await db.rollback()
-        logger.exception("Error getting payment status for %s", payment_id)
+        logger.exception("Error getting payment status for %s", sanitize_log(payment_id))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get payment status",
@@ -294,7 +297,7 @@ async def get_payment_history(
         )
     except Exception:
         await db.rollback()
-        logger.exception("Error getting payment history for user %s", user_id)
+        logger.exception("Error getting payment history for user %s", sanitize_log(user_id))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get payment history",
@@ -336,15 +339,14 @@ async def cancel_payment(
         )
     except ValueError:
         await db.rollback()
-        # SonarQube Fix: Replaced str(e) leakage with generic safe message
-        logger.exception("Validation error cancelling payment %s", payment_id)
+        logger.exception("Validation error cancelling payment %s", sanitize_log(payment_id))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid payment cancellation request",
         )
     except Exception:
         await db.rollback()
-        logger.exception("Error cancelling payment %s", payment_id)
+        logger.exception("Error cancelling payment %s", sanitize_log(payment_id))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to cancel payment",
@@ -363,19 +365,17 @@ async def upload_payment_proof(
     payment_id: str,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
-    file: UploadFile = File(...)
+    file: UploadFile  # SonarQube Fix: Removed File(...) ellipsis code smell
 ):
     """Upload payment proof screenshot"""
     user_id = str(getattr(current_user, "id", ""))
 
     try:
-        # SonarQube Fix: Bulletproof Path Traversal Protection
         base_dir = os.path.abspath(os.path.join("uploads", "payment_proofs"))
         safe_filename = os.path.basename(file.filename)
         filename = f"{uuid.uuid4()}_{safe_filename}"
         filepath = os.path.abspath(os.path.join(base_dir, filename))
         
-        # Absolute boundary check to ensure file cannot escape uploads directory
         if not filepath.startswith(base_dir):
             raise HTTPException(status_code=400, detail="Invalid file path detected.")
         
@@ -396,7 +396,7 @@ async def upload_payment_proof(
         })
         await db.commit()
         
-        logger.info("[PAYMENT] Proof uploaded for payment %s: %s", payment_id, filename)
+        logger.info("[PAYMENT] Proof uploaded for payment %s: %s", sanitize_log(payment_id), sanitize_log(filename))
         
         return ResponseFormatter.create_success(
             message="Payment proof uploaded successfully",
@@ -407,5 +407,5 @@ async def upload_payment_proof(
         raise
     except Exception:
         await db.rollback()
-        logger.exception("Error uploading proof for payment %s", payment_id)
+        logger.exception("Error uploading proof for payment %s", sanitize_log(payment_id))
         raise HTTPException(status_code=500, detail="Upload failed due to internal error.")
