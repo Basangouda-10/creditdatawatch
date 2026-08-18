@@ -14,7 +14,10 @@ const API_BASE_URL = (() => {
   if (!u) return '/api/v1'
   if (u.startsWith('/')) return stripTrailingSlash(u)
   if (u.startsWith(':')) u = 'http://127.0.0.1' + u
-  if (!u.startsWith('http://') && !u.startsWith('https://')) u = 'http://' + u
+  
+  // SonarQube Fix: Enforce HTTPS instead of HTTP for security
+  if (!u.startsWith('http://') && !u.startsWith('https://')) u = 'https://' + u
+  
   if (!/\/api\/v1\/?$/.test(u)) {
     if (u.endsWith('/')) u += 'api/v1'
     else if (!/\/api\/v1/.test(u)) u += '/api/v1'
@@ -25,11 +28,9 @@ const API_BASE_URL = (() => {
 // Get base URL for static files (uploads)
 const STATIC_BASE_URL = (() => {
   let u = API_BASE_URL
-  // Remove /api/v1 suffix
   if (u.includes('/api/v1')) {
     u = u.replace('/api/v1', '')
   }
-  // If it's a relative path and ends up empty, use empty string
   if (!u || u === '') {
     return ''
   }
@@ -37,6 +38,49 @@ const STATIC_BASE_URL = (() => {
 })()
 
 export { STATIC_BASE_URL }
+
+// SonarQube Fix: Extracted response parsing to reduce apiRequest cognitive complexity
+async function parseResponseData(response) {
+  if (response.status === 204) return null;
+  const contentType = response.headers.get('content-type');
+  if (contentType?.includes('application/json')) {
+    const text = await response.text();
+    return text ? JSON.parse(text) : null;
+  }
+  return await response.text();
+}
+
+// SonarQube Fix: Extracted Auth failure handling to reduce apiRequest cognitive complexity
+async function handleAuthFailure(endpoint, options, data) {
+  if (endpoint.includes('/auth/refresh') || endpoint.includes('/auth/login') || endpoint.includes('/auth/register')) {
+    return {
+      ok: false,
+      status: 401,
+      error: data?.error?.message || data?.detail || 'Session expired',
+      data: null,
+    }
+  }
+
+  localStorage.removeItem('access_token')
+  localStorage.removeItem('token')
+
+  const refreshed = await refreshAccessToken()
+  if (refreshed) {
+    return apiRequest(endpoint, options)
+  }
+  
+  if (typeof window !== 'undefined' && !window.location.pathname.includes('/auth/login')) {
+    console.warn('Unauthorized access, redirecting to login...')
+    window.location.replace('/auth/login?expired=true')
+  }
+
+  return {
+    ok: false,
+    status: 401,
+    error: data?.error?.message || data?.detail || 'Unauthorized - please login again',
+    data: null,
+  }
+}
 
 /**
  * Make an authenticated API request with cookie support
@@ -47,10 +91,8 @@ export { STATIC_BASE_URL }
 async function apiRequest(endpoint, options = null) {
   const opts = options || {};
   const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : '/' + endpoint}`
-  // Increased default timeout to 180s for AI-heavy tasks
   const timeout = opts.timeout || 180000 
   
-  // Create AbortController if signal is not provided
   let controller = null
   let signal = opts.signal
   let timeoutId = null
@@ -64,7 +106,7 @@ async function apiRequest(endpoint, options = null) {
   }
 
   const defaultOptions = {
-    credentials: 'include', // Send cookies with every request
+    credentials: 'include', 
     signal: signal,
     headers: {
       ...(opts.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
@@ -73,7 +115,6 @@ async function apiRequest(endpoint, options = null) {
     ...opts,
   }
 
-  // Manually attach access_token from localStorage if available (fallback for non-cookie scenarios)
   const token = localStorage.getItem('access_token') || localStorage.getItem('token')
   const isValidToken = token && token !== 'undefined' && token !== 'null' && token.length > 10
   
@@ -84,61 +125,14 @@ async function apiRequest(endpoint, options = null) {
   try {
     const response = await fetch(url, defaultOptions)
     if (timeoutId) clearTimeout(timeoutId)
-    const contentType = response.headers.get('content-type')
-    let data = null;
+    
+    const data = await parseResponseData(response);
 
-    // A 204 No Content (or any response with an empty body) has nothing
-    // to parse — attempting response.json() on it throws "Unexpected end
-    // of JSON input" even when the Content-Type header says JSON.
-    if (response.status === 204) {
-      data = null
-    } else if (contentType?.includes('application/json')) {
-      const text = await response.text()
-      data = text ? JSON.parse(text) : null
-    } else {
-      data = await response.text()
-    }
-
-    // Handle 401 Unauthorized - Try to refresh token
     if (response.status === 401) {
-      // Don't retry refresh if the endpoint itself IS refresh or login
-      if (endpoint.includes('/auth/refresh') || endpoint.includes('/auth/login') || endpoint.includes('/auth/register')) {
-        return {
-          ok: false,
-          status: 401,
-          error: data?.error?.message || data?.detail || 'Session expired',
-          data: null,
-        }
-      }
-
-      // Clear local token if backend says it's invalid
-      localStorage.removeItem('access_token')
-      localStorage.removeItem('token')
-
-      const refreshed = await refreshAccessToken()
-      if (refreshed) {
-        // Retry the original request after refresh
-        return apiRequest(endpoint, opts)
-      }
-      
-      // If refresh failed or not possible, redirect to login
-      if (typeof window !== 'undefined' && !window.location.pathname.includes('/auth/login')) {
-        console.warn('Unauthorized access, redirecting to login...')
-        // Use replace to avoid back button issues
-        window.location.replace('/auth/login?expired=true')
-      }
-
-      return {
-        ok: false,
-        status: 401,
-        error: data?.error?.message || data?.detail || 'Unauthorized - please login again',
-        data: null,
-      }
+      return handleAuthFailure(endpoint, opts, data);
     }
 
-    // Handle other errors
     if (!response.ok) {
-      // Check for database connection errors
       if (response.status === 503 && data?.error?.code === 'DATABASE_CONNECTION_ERROR') {
         return {
           ok: false,
@@ -156,17 +150,15 @@ async function apiRequest(endpoint, options = null) {
       }
     }
 
-    // Success response
     const isSuccess = response.ok || (typeof data === 'object' && data?.success === true)
-    const result = {
+    return {
       ok: isSuccess,
       success: data?.success,
       status: response.status,
-      data: data?.data || data, // Backend returns {data: ...}, fallback to response
+      data: data?.data || data, 
       error: null,
-      ...data, // Spread all top-level fields from data (like unread_count)
+      ...data, 
     }
-    return result
   } catch (error) {
     if (timeoutId) clearTimeout(timeoutId)
     console.error(`API Request Error [${endpoint}]:`, error)
@@ -207,7 +199,6 @@ async function refreshAccessToken() {
     const data = await response.json()
     
     if (response.ok && data.data) {
-      // If backend returned a new access token in the response data, store it
       if (data.data.access_token) {
         localStorage.setItem('access_token', data.data.access_token)
         localStorage.setItem('token', data.data.access_token)
@@ -281,21 +272,19 @@ export const purchaseOrders = {
   create: (data) => {
     const formData = new FormData()
     
-    if (data.po_number) formData.append('po_number', data.po_number)
-    if (data.vendor) formData.append('vendor', data.vendor)
-    if (data.gstin) formData.append('gstin', data.gstin)
-    if (data.vendor_email) formData.append('vendor_email', data.vendor_email)
-    if (data.vendor_phone) formData.append('vendor_phone', data.vendor_phone)
-    if (data.amount) formData.append('amount', data.amount)
-    if (data.due_date) formData.append('due_date', data.due_date)
-    if (data.status) formData.append('status', data.status)
-    if (data.notes) formData.append('notes', data.notes)
-    if (data.evidence_url) formData.append('evidence_url', data.evidence_url)
-    if (data.supplier_address) formData.append('supplier_address', data.supplier_address)
-    if (data.delivery_address) formData.append('delivery_address', data.delivery_address)
-    if (data.invoice_address) formData.append('invoice_address', data.invoice_address)
-    if (data.payment_window_days) formData.append('payment_window_days', data.payment_window_days)
-    if (data.reason) formData.append('reason', data.reason)
+    // SonarQube Fix: Replaced 15 if-statements with a map to reduce cognitive complexity
+    const textFields = [
+      'po_number', 'vendor', 'gstin', 'vendor_email', 'vendor_phone', 
+      'amount', 'due_date', 'status', 'notes', 'evidence_url', 
+      'supplier_address', 'delivery_address', 'invoice_address', 
+      'payment_window_days', 'reason'
+    ];
+    
+    textFields.forEach(field => {
+      if (data[field] !== undefined && data[field] !== null) {
+        formData.append(field, data[field]);
+      }
+    });
     
     if (data.file) {
       formData.append('file', data.file)
@@ -310,7 +299,6 @@ export const purchaseOrders = {
   bulkImport: (formData) => apiRequest('/purchase-orders/bulk-import-upload', { 
     method: 'POST', 
     body: formData,
-    // Note: Don't set Content-Type header; fetch will automatically set it to multipart/form-data with boundary
     headers: {} 
   }),
   bulkImportJson: (items) => apiRequest('/purchase-orders/bulk-import', { 
@@ -367,10 +355,9 @@ export const admin = {
   updateSettings: (data) => apiRequest('/user/admin/settings', { method: 'POST', body: JSON.stringify(data) }),
   getSubscriptionAnalytics: () => apiRequest('/admin/analytics/subscriptions'),
   getDefaulterAnalytics: () => apiRequest('/admin/analytics/defaulters'),
-  getInternalStats: () => apiRequest('/admin/analytics/internal'), // We'll add this
+  getInternalStats: () => apiRequest('/admin/analytics/internal'),
 }
 
-// Manual reminder for PO (additive standalone function)
 export const sendPOReminder = (poId, data = null) => apiRequest(`/purchase-orders/${poId}/send-reminder`, { method: 'POST', body: data ? JSON.stringify(data) : undefined })
 
 export const getPOReminderConfig = () => apiRequest('/admin/po-reminders')
@@ -525,7 +512,6 @@ export const drive = {
   upload: (formData) => apiRequest('/drive/upload', {
     method: 'POST',
     body: formData,
-    // Do NOT set Content-Type header for FormData; fetch sets it with boundary automatically
     headers: {}
   }),
 }
@@ -562,7 +548,6 @@ export const audit = {
   },
 }
 
-// Global Credibility Index
 export const credibilityIndex = {
   initiateReview: (data) => apiRequest('/credibility-index/initiate', { method: 'POST', body: JSON.stringify(data) }),
   getPendingFinancial: () => apiRequest('/credibility-index/pending/financial'),
@@ -577,7 +562,6 @@ export const credibilityIndex = {
   getReviewStatus: (businessRequestId) => apiRequest(`/credibility-index/status/${businessRequestId}`),
 }
 
-// Utility: Check authentication status
 export const authUtils = {
   isAuthenticated,
   refreshToken: refreshAccessToken,
