@@ -1,15 +1,25 @@
 const RAW_BASE = import.meta.env.VITE_API_URL || '/api/v1'
+
+// Helper function to safely remove trailing slashes without ReDoS risk
+const stripTrailingSlash = (str) => {
+  let s = str;
+  while (s.endsWith('/')) {
+    s = s.slice(0, -1);
+  }
+  return s;
+};
+
 const API_BASE_URL = (() => {
   let u = (RAW_BASE || '').trim()
   if (!u) return '/api/v1'
-  if (u.startsWith('/')) return u.replace(/\/+$/, '')
+  if (u.startsWith('/')) return stripTrailingSlash(u)
   if (u.startsWith(':')) u = 'http://127.0.0.1' + u
   if (!u.startsWith('http://') && !u.startsWith('https://')) u = 'http://' + u
   if (!/\/api\/v1\/?$/.test(u)) {
     if (u.endsWith('/')) u += 'api/v1'
     else if (!/\/api\/v1/.test(u)) u += '/api/v1'
   }
-  return u.replace(/\/+$/, '')
+  return stripTrailingSlash(u)
 })()
 
 // Get base URL for static files (uploads)
@@ -23,7 +33,7 @@ const STATIC_BASE_URL = (() => {
   if (!u || u === '') {
     return ''
   }
-  return u.replace(/\/+$/, '')
+  return stripTrailingSlash(u)
 })()
 
 export { STATIC_BASE_URL }
@@ -34,14 +44,15 @@ export { STATIC_BASE_URL }
  * @param {object} options - Fetch options (method, body, headers, etc.)
  * @returns {Promise<{ok: boolean, data: any, error?: string, status: number}>}
  */
-async function apiRequest(endpoint, options = {}) {
+async function apiRequest(endpoint, options = null) {
+  const opts = options || {};
   const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : '/' + endpoint}`
   // Increased default timeout to 180s for AI-heavy tasks
-  const timeout = options.timeout || 180000 
+  const timeout = opts.timeout || 180000 
   
   // Create AbortController if signal is not provided
   let controller = null
-  let signal = options.signal
+  let signal = opts.signal
   let timeoutId = null
 
   if (!signal) {
@@ -56,10 +67,10 @@ async function apiRequest(endpoint, options = {}) {
     credentials: 'include', // Send cookies with every request
     signal: signal,
     headers: {
-      ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-      ...options.headers,
+      ...(opts.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+      ...opts.headers,
     },
-    ...options,
+    ...opts,
   }
 
   // Manually attach access_token from localStorage if available (fallback for non-cookie scenarios)
@@ -74,7 +85,7 @@ async function apiRequest(endpoint, options = {}) {
     const response = await fetch(url, defaultOptions)
     if (timeoutId) clearTimeout(timeoutId)
     const contentType = response.headers.get('content-type')
-    let data = null
+    let data = null;
 
     // A 204 No Content (or any response with an empty body) has nothing
     // to parse — attempting response.json() on it throws "Unexpected end
@@ -107,7 +118,7 @@ async function apiRequest(endpoint, options = {}) {
       const refreshed = await refreshAccessToken()
       if (refreshed) {
         // Retry the original request after refresh
-        return apiRequest(endpoint, options)
+        return apiRequest(endpoint, opts)
       }
       
       // If refresh failed or not possible, redirect to login
