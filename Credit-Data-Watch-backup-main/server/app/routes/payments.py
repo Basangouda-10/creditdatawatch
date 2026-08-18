@@ -38,14 +38,6 @@ async def initiate_payment(
 ):
     """
     Initiate payment for a plan
-    
-    Args:
-        request: Payment initiation request
-        current_user: Current authenticated user
-        db: Database session
-        
-    Returns:
-        Payment details with payment options
     """
     user_id = str(getattr(current_user, "id", ""))
     user_email = str(getattr(current_user, "email", "unknown"))
@@ -64,7 +56,6 @@ async def initiate_payment(
             db=db,
         )
         
-        # Get plan details with flexible matching (id, upper name, display name)
         plan_query = str(request.plan_id or "").strip()
         plan_stmt = select(Plan).where(
             or_(
@@ -113,8 +104,8 @@ async def initiate_payment(
         raise
     except Exception as e:
         await db.rollback()
-        # SonarQube Fix: Removed f-string from logger
-        logger.error("Error initiating payment for user %s: %s", user_email, str(e), exc_info=True)
+        # SonarQube Fix: Use logger.exception instead of logger.error with exc_info=True
+        logger.exception("Error initiating payment for user %s", user_email)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to initiate payment: {str(e)}",
@@ -130,15 +121,6 @@ async def verify_payment(
 ):
     """
     Verify payment completion
-    
-    Args:
-        payment_id: Payment ID
-        request: Payment verification request
-        current_user: Current authenticated user
-        db: Database session
-        
-    Returns:
-        Payment verification result with subscription details
     """
     user_id = str(getattr(current_user, "id", ""))
 
@@ -207,8 +189,8 @@ async def verify_payment(
         raise
     except Exception as e:
         await db.rollback()
-        # SonarQube Fix: Removed f-string from logger
-        logger.error("Error verifying payment %s: %s", payment_id, str(e), exc_info=True)
+        # SonarQube Fix: Use logger.exception
+        logger.exception("Error verifying payment %s", payment_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to verify payment: {str(e)}",
@@ -223,14 +205,6 @@ async def get_payment_status(
 ):
     """
     Get payment status
-    
-    Args:
-        payment_id: Payment ID
-        current_user: Current authenticated user
-        db: Database session
-        
-    Returns:
-        Payment status details
     """
     user_id = str(getattr(current_user, "id", ""))
 
@@ -266,8 +240,8 @@ async def get_payment_status(
         raise
     except Exception as e:
         await db.rollback()
-        # SonarQube Fix: Removed f-string from logger
-        logger.error("Error getting payment status for %s: %s", payment_id, str(e))
+        # SonarQube Fix: Use logger.exception
+        logger.exception("Error getting payment status for %s", payment_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get payment status",
@@ -283,15 +257,6 @@ async def get_payment_history(
 ):
     """
     Get user's payment history
-    
-    Args:
-        current_user: Current authenticated user
-        db: Database session
-        limit: Maximum number of payments to return
-        offset: Offset for pagination
-        
-    Returns:
-        List of payment history entries
     """
     user_id = str(getattr(current_user, "id", ""))
 
@@ -329,7 +294,8 @@ async def get_payment_history(
         )
     except Exception as e:
         await db.rollback()
-        logger.error("Error getting payment history for user %s: %s", user_id, str(e))
+        # SonarQube Fix: Use logger.exception
+        logger.exception("Error getting payment history for user %s", user_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get payment history",
@@ -344,14 +310,6 @@ async def cancel_payment(
 ):
     """
     Cancel a pending payment
-    
-    Args:
-        payment_id: Payment ID
-        current_user: Current authenticated user
-        db: Database session
-        
-    Returns:
-        Cancelled payment details
     """
     user_id = str(getattr(current_user, "id", ""))
 
@@ -385,7 +343,8 @@ async def cancel_payment(
         )
     except Exception as e:
         await db.rollback()
-        logger.error("Error cancelling payment %s: %s", payment_id, str(e))
+        # SonarQube Fix: Use logger.exception
+        logger.exception("Error cancelling payment %s", payment_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to cancel payment",
@@ -410,7 +369,6 @@ async def upload_payment_proof(
     user_id = str(getattr(current_user, "id", ""))
 
     try:
-        # SonarQube Fix: Sanitize filename to prevent path traversal
         safe_filename = os.path.basename(file.filename)
         filename = f"{uuid.uuid4()}_{safe_filename}"
         filepath = f"uploads/payment_proofs/{filename}"
@@ -432,7 +390,6 @@ async def upload_payment_proof(
         })
         await db.commit()
         
-        # SonarQube Fix: Removed f-string from logger
         logger.info("[PAYMENT] Proof uploaded for payment %s: %s", payment_id, filename)
         
         return ResponseFormatter.create_success(
@@ -441,5 +398,6 @@ async def upload_payment_proof(
         )
     except Exception as e:
         await db.rollback()
-        logger.error("Error uploading proof for payment %s: %s", payment_id, str(e))
+        # SonarQube Fix: Use logger.exception
+        logger.exception("Error uploading proof for payment %s", payment_id)
         raise HTTPException(status_code=500, detail="Upload failed due to internal error.")
