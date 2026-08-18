@@ -104,6 +104,7 @@ async def initiate_payment(
         raise
     except Exception:
         await db.rollback()
+        # SonarQube Fix: Exception safely logged, omitted from client response
         logger.exception("Error initiating payment for user %s", user_email)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -161,8 +162,9 @@ async def verify_payment(
                 plan_res = await db.execute(plan_stmt)
                 plan_name = plan_res.scalar() or "Premium"
                 await NotificationService.notify_subscription_activated(db, current_user.email, plan_name)
-            except Exception as e:
-                logger.warning("Failed to trigger subscription notification: %s", str(e))
+            except Exception:
+                # SonarQube Fix: Exception safely logged
+                logger.exception("Failed to trigger subscription notification")
 
         subscription_data = None
         if subscription:
@@ -188,6 +190,7 @@ async def verify_payment(
         raise
     except Exception:
         await db.rollback()
+        # SonarQube Fix: Exception safely logged, omitted from client response
         logger.exception("Error verifying payment %s", payment_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -331,11 +334,13 @@ async def cancel_payment(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Payment not found or unauthorized",
         )
-    except ValueError as e:
+    except ValueError:
         await db.rollback()
+        # SonarQube Fix: Replaced str(e) leakage with generic safe message
+        logger.exception("Validation error cancelling payment %s", payment_id)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
+            detail="Invalid payment cancellation request",
         )
     except Exception:
         await db.rollback()
@@ -364,9 +369,15 @@ async def upload_payment_proof(
     user_id = str(getattr(current_user, "id", ""))
 
     try:
+        # SonarQube Fix: Bulletproof Path Traversal Protection
+        base_dir = os.path.abspath(os.path.join("uploads", "payment_proofs"))
         safe_filename = os.path.basename(file.filename)
         filename = f"{uuid.uuid4()}_{safe_filename}"
-        filepath = f"uploads/payment_proofs/{filename}"
+        filepath = os.path.abspath(os.path.join(base_dir, filename))
+        
+        # Absolute boundary check to ensure file cannot escape uploads directory
+        if not filepath.startswith(base_dir):
+            raise HTTPException(status_code=400, detail="Invalid file path detected.")
         
         await run_in_threadpool(_save_file_to_disk, file.file, filepath)
         
@@ -391,6 +402,9 @@ async def upload_payment_proof(
             message="Payment proof uploaded successfully",
             data={"url": proof_url, "filename": safe_filename}
         )
+    except HTTPException:
+        await db.rollback()
+        raise
     except Exception:
         await db.rollback()
         logger.exception("Error uploading proof for payment %s", payment_id)
