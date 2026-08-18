@@ -53,7 +53,9 @@ async def upload_evidence(
     """Upload evidence file for PO edit"""
     try:
         os.makedirs("uploads/evidence", exist_ok=True)
-        file_ext = file.filename.split(".")[-1]
+        # SonarQube Fix: Sanitize filename to prevent path traversal
+        safe_filename = os.path.basename(file.filename)
+        file_ext = safe_filename.split(".")[-1] if "." in safe_filename else "bin"
         file_id = str(uuid.uuid4())
         file_path = f"uploads/evidence/{file_id}.{file_ext}"
         
@@ -61,9 +63,11 @@ async def upload_evidence(
             shutil.copyfileobj(file.file, buffer)
             
         url = f"{settings.BASE_URL}/{file_path}"
-        return ResponseFormatter.create_success(data={"url": url, "filename": file.filename})
+        return ResponseFormatter.create_success(data={"url": url, "filename": safe_filename})
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+        logger.error(f"Upload failed: {str(e)}")
+        # SonarQube Fix: Mask internal errors
+        raise HTTPException(status_code=500, detail="Upload failed due to an internal server error.")
 
 async def write_audit_log(db, po_id, po_number, action, user_email, user_role, reason="", changes=""): 
     try: 
@@ -85,12 +89,11 @@ async def write_audit_log(db, po_id, po_number, action, user_email, user_role, r
         ) 
         await db.commit() 
     except Exception as e: 
-        print(f"Audit log error: {e}") 
+        logger.error(f"Audit log error: {e}") 
 
 async def sync_vendor_credibility(vendor_name: str, db: AsyncSession, current_user=None): 
     try: 
         import uuid as uuid_lib 
-        from datetime import datetime
         if not vendor_name or not vendor_name.strip(): 
             return 
         
@@ -148,8 +151,8 @@ async def sync_vendor_credibility(vendor_name: str, db: AsyncSession, current_us
         await db.commit() 
     except Exception as e: 
         import traceback 
-        print(f"[SYNC ERROR] {vendor_name}: {e}") 
-        traceback.print_exc() 
+        logger.error(f"[SYNC ERROR] {vendor_name}: {e}") 
+        logger.error(traceback.format_exc())
 
 PO_MANAGEMENT = "PO_MANAGEMENT"
 PO_FEATURE_NAME = "PO Management"
@@ -184,7 +187,6 @@ async def get_audit_logs(
     if role not in allowed_roles and current_user.email != 'payalshinde906@gmail.com': 
         raise HTTPException(status_code=403, detail="Access denied. Admins only.") 
     
-    from sqlalchemy import text 
     query = "SELECT * FROM audit_logs WHERE 1=1" 
     params = {} 
     
@@ -194,7 +196,6 @@ async def get_audit_logs(
     
     if date_from: 
         try:
-            from datetime import datetime
             dt_val = datetime.fromisoformat(date_from)
             query += " AND created_at >= :date_from" 
             params["date_from"] = dt_val 
@@ -224,10 +225,10 @@ async def get_admin_settings(db: Annotated[AsyncSession, Depends(get_db)]):
     from app.models import AppSettings
     stmt = select(AppSettings).where(AppSettings.id == 'default')
     result = await db.execute(stmt)
-    settings = result.scalars().first()
-    if not settings:
+    settings_obj = result.scalars().first()
+    if not settings_obj:
         return ResponseFormatter.create_success(data={"payment_window_days": 50})
-    return ResponseFormatter.create_success(data={"payment_window_days": settings.payment_window_days})
+    return ResponseFormatter.create_success(data={"payment_window_days": settings_obj.payment_window_days})
 
 @user_router.post("/admin/settings")
 async def update_admin_settings(req: AdminSettingsRequest, current_user: Annotated[User, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)]):
@@ -241,14 +242,14 @@ async def update_admin_settings(req: AdminSettingsRequest, current_user: Annotat
     from app.models import AppSettings
     stmt = select(AppSettings).where(AppSettings.id == 'default')
     result = await db.execute(stmt)
-    settings = result.scalars().first()
+    settings_obj = result.scalars().first()
     
-    if not settings:
-        settings = AppSettings(id='default', payment_window_days=payment_window_days)
-        db.add(settings)
+    if not settings_obj:
+        settings_obj = AppSettings(id='default', payment_window_days=payment_window_days)
+        db.add(settings_obj)
     else:
-        settings.payment_window_days = payment_window_days
-        settings.updated_at = datetime.now(timezone.utc)
+        settings_obj.payment_window_days = payment_window_days
+        settings_obj.updated_at = datetime.now(timezone.utc)
         
     await log_audit(db, current_user, "UPDATE_SETTINGS", reason=f"Payment window updated to {payment_window_days} days")
     await db.commit()
@@ -395,7 +396,7 @@ async def list_pos(
         return ResponseFormatter.create_success(data=rows)
     except Exception as e:
         import traceback
-        traceback.print_exc()
+        logger.error(traceback.format_exc())
         return ResponseFormatter.create_success(data=[])
 
 @po_router.post("")
@@ -410,7 +411,6 @@ async def create_po(
     import uuid
     import os
     import shutil
-    from datetime import datetime, date, timedelta
 
     try:
         role = str(current_user.role or "").upper()
@@ -462,12 +462,15 @@ async def create_po(
                 due_date_obj = due_date_raw
         
         if due_date_obj is None:
-            due_date_obj = datetime.utcnow() + timedelta(days=30)
+            # SonarQube Fix: Updated deprecated utcnow()
+            due_date_obj = datetime.now(timezone.utc) + timedelta(days=30)
         
         document_url_final = data.get("document_url")
         if file and file.filename:
             os.makedirs("uploads/purchase_orders", exist_ok=True)
-            filename = f"{uuid.uuid4().hex[:8]}_{file.filename}"
+            # SonarQube Fix: Sanitize filename to prevent path traversal
+            safe_filename = os.path.basename(file.filename)
+            filename = f"{uuid.uuid4().hex[:8]}_{safe_filename}"
             filepath = f"uploads/purchase_orders/{filename}"
             with open(filepath, "wb") as f_out:
                 shutil.copyfileobj(file.file, f_out)
@@ -519,7 +522,8 @@ async def create_po(
         await db.rollback()
         error_msg = f"ERROR creating PO: {str(e)}\n{traceback.format_exc()}"
         logger.error(error_msg)
-        return JSONResponse(status_code=500, content={"success": False, "detail": str(e)})
+        # SonarQube Fix: Masked raw system error
+        return JSONResponse(status_code=500, content={"success": False, "detail": "Internal server error occurred while creating PO."})
 
 @po_router.post("/{po_id}/archive")
 async def archive_po(
@@ -665,9 +669,9 @@ async def notify_po_vendor(
             await log_audit(db, current_user, "REMINDER_SENT", entity_obj=po, reason="Payment reminder sent")
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
+        logger.error(f"Failed to send reminder email: {str(e)}")
+        # SonarQube Fix: Masked raw system error
+        raise HTTPException(status_code=500, detail="Failed to send email due to an internal server error.")
 
     return ResponseFormatter.create_success(message=f"Successfully sent to {target_email}")
 

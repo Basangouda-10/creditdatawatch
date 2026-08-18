@@ -91,7 +91,8 @@ async def list_invoices(
     except Exception as e:
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        # SonarQube Fix: Masked raw system error
+        raise HTTPException(status_code=500, detail="Internal server error occurred.")
 
 @invoice_router.post("")
 @invoice_router.post("/")
@@ -143,7 +144,9 @@ async def create_invoice(
         document_url_final = None
         if file and file.filename:
             os.makedirs("uploads/invoices", exist_ok=True)
-            filename = f"{uuid.uuid4().hex[:8]}_{file.filename}"
+            # SonarQube Fix: Sanitize filename to prevent path traversal
+            safe_filename = os.path.basename(file.filename)
+            filename = f"{uuid.uuid4().hex[:8]}_{safe_filename}"
             filepath = f"uploads/invoices/{filename}"
             with open(filepath, "wb") as f_out:
                 shutil.copyfileobj(file.file, f_out)
@@ -192,7 +195,8 @@ async def create_invoice(
         await db.rollback()
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        # SonarQube Fix: Masked raw system error
+        raise HTTPException(status_code=500, detail="Internal server error occurred.")
 
 @invoice_router.put("/{invoice_id}")
 async def update_invoice(
@@ -223,25 +227,26 @@ async def update_invoice(
             if c_name:
                 for f in ["customer_name", "counterparty_name", "customer"]:
                     try: setattr(inv, f, c_name)
-                    except: pass
+                    # SonarQube Fix: Replaced bare except with except Exception
+                    except Exception: pass
             
             c_pan = body.get("counterparty_pan") or body.get("pan") or body.get("bill_to_pan")
             if c_pan:
                 for f in ["counterparty_pan", "pan", "customer_pan"]:
                     try: setattr(inv, f, str(c_pan).strip().upper())
-                    except: pass
+                    except Exception: pass
             
             c_email = body.get("email") or body.get("customer_email") or body.get("bill_to_email")
             if c_email is not None:
                 for f in ["customer_email", "email"]:
                     try: setattr(inv, f, str(c_email).strip())
-                    except: pass
+                    except Exception: pass
                     
             c_mobile = body.get("mobile") or body.get("customer_mobile") or body.get("bill_to_mobile")
             if c_mobile is not None:
                 for f in ["customer_mobile", "mobile", "phone"]:
                     try: setattr(inv, f, str(c_mobile).strip())
-                    except: pass
+                    except Exception: pass
 
             if body.get("amount") is not None or body.get("total") is not None:
                 inv.total = float(body.get("amount") or body.get("total"))
@@ -253,21 +258,21 @@ async def update_invoice(
             if counterparty_name:
                 for f in ["customer_name", "counterparty_name", "customer"]:
                     try: setattr(inv, f, counterparty_name)
-                    except: pass
+                    except Exception: pass
             if counterparty_pan:
                 if not str(counterparty_pan).strip():
                     raise HTTPException(status_code=400, detail="Counterparty PAN is mandatory.")
                 for f in ["counterparty_pan", "pan", "customer_pan"]:
                     try: setattr(inv, f, str(counterparty_pan).strip().upper())
-                    except: pass
+                    except Exception: pass
             if email is not None:
                 for f in ["customer_email", "email"]:
                     try: setattr(inv, f, str(email).strip())
-                    except: pass
+                    except Exception: pass
             if mobile is not None:
                 for f in ["customer_mobile", "mobile", "phone"]:
                     try: setattr(inv, f, str(mobile).strip())
-                    except: pass
+                    except Exception: pass
             if amount is not None:
                 inv.total = amount
             if status:
@@ -279,7 +284,9 @@ async def update_invoice(
 
         if file and file.filename:
             os.makedirs("uploads/invoices", exist_ok=True)
-            filename = f"{uuid.uuid4().hex[:8]}_{file.filename}"
+            # SonarQube Fix: Sanitize filename to prevent path traversal
+            safe_filename = os.path.basename(file.filename)
+            filename = f"{uuid.uuid4().hex[:8]}_{safe_filename}"
             filepath = f"uploads/invoices/{filename}"
             with open(filepath, "wb") as f_out:
                 shutil.copyfileobj(file.file, f_out)
@@ -292,7 +299,8 @@ async def update_invoice(
         raise he
     except Exception as e:
         await db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        # SonarQube Fix: Masked raw system error
+        raise HTTPException(status_code=500, detail="Internal server error occurred.")
 
 @invoice_router.post("/{invoice_id}/acknowledge")
 async def acknowledge_invoice(invoice_id: str, current_user: Annotated[User, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)]):
@@ -356,7 +364,8 @@ async def notify_invoice_customer(invoice_id: str, current_user: Annotated[User,
     except Exception as e:
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
+        # SonarQube Fix: Masked raw system error
+        raise HTTPException(status_code=500, detail="Failed to send email due to an internal server error.")
 
     return ResponseFormatter.create_success(message=f"Reminder email successfully sent to {target_email}")
 
