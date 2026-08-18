@@ -102,13 +102,12 @@ async def initiate_payment(
     except HTTPException:
         await db.rollback()
         raise
-    except Exception as e:
+    except Exception:
         await db.rollback()
-        # SonarQube Fix: Use logger.exception instead of logger.error with exc_info=True
         logger.exception("Error initiating payment for user %s", user_email)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to initiate payment: {str(e)}",
+            detail="Failed to initiate payment due to an internal error.",
         )
 
 
@@ -187,13 +186,12 @@ async def verify_payment(
     except HTTPException:
         await db.rollback()
         raise
-    except Exception as e:
+    except Exception:
         await db.rollback()
-        # SonarQube Fix: Use logger.exception
         logger.exception("Error verifying payment %s", payment_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to verify payment: {str(e)}",
+            detail="Failed to verify payment due to an internal error.",
         )
 
 
@@ -238,9 +236,8 @@ async def get_payment_status(
     except HTTPException:
         await db.rollback()
         raise
-    except Exception as e:
+    except Exception:
         await db.rollback()
-        # SonarQube Fix: Use logger.exception
         logger.exception("Error getting payment status for %s", payment_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -292,9 +289,8 @@ async def get_payment_history(
                 "total": len(payment_data),
             },
         )
-    except Exception as e:
+    except Exception:
         await db.rollback()
-        # SonarQube Fix: Use logger.exception
         logger.exception("Error getting payment history for user %s", user_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -341,9 +337,8 @@ async def cancel_payment(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
-    except Exception as e:
+    except Exception:
         await db.rollback()
-        # SonarQube Fix: Use logger.exception
         logger.exception("Error cancelling payment %s", payment_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -396,8 +391,7 @@ async def upload_payment_proof(
             message="Payment proof uploaded successfully",
             data={"url": proof_url, "filename": safe_filename}
         )
-    except Exception as e:
+    except Exception:
         await db.rollback()
-        # SonarQube Fix: Use logger.exception
         logger.exception("Error uploading proof for payment %s", payment_id)
         raise HTTPException(status_code=500, detail="Upload failed due to internal error.")
