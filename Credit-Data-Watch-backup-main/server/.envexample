@@ -1,4 +1,4 @@
-DATABASE_URL=postgresql+asyncpg://postgres:bindugs@localhost:5432/creditdatawatch
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/creditdatawatch
 
 GOOGLE_SMTP_HOST=smtp.gmail.com
 GOOGLE_SMTP_PORT=465
