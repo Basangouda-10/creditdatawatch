@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/pyright/main/packages/pyright/schema/pyrightconfig.schema.json",
+  "reportMissingImports": false,
+  "reportMissingTypeStubs": false,
+  "venvPath": ".",
+  "venv": "server/.venv",
+  "pythonVersion": "3.11",
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    "c:/Python314/**"
+  ]
+}

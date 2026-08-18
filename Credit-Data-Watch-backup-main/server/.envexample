@@ -1,0 +1,8 @@
+DATABASE_URL=postgresql+asyncpg://postgres:bindugs@localhost:5432/creditdatawatch
+
+GOOGLE_SMTP_HOST=smtp.gmail.com
+GOOGLE_SMTP_PORT=465
+GOOGLE_SMTP_USER=YourEmail@gmail.com
+GOOGLE_SMTP_PASSWORD=YourPasswordHere
+SENDER_EMAIL=YourEmail@gmail.com
+SENDER_NAME=CreditDataWatch

@@ -1,0 +1,28 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+.env
+.env.local
+.env.*.local
+coverage/
+coverage.xml
+.scannerwork/
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+all standards.txt
+*.db
+server/.env
+venv/
+__pycache__/
+server/service-account.json
+server/credentials/
+CreditDataWatch (2).txt
+Usage Policy.txt
+Your Privacy Rights.txt
+server/uploads/
